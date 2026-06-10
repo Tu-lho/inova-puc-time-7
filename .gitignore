@@ -1,6 +1,4 @@
 # Artefatos gerados
-data/*.png
-data/*.html
 data/*.csv
 
 # Python
