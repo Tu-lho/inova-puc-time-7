@@ -1,4 +1,9 @@
 # GraphGuard Pix
+## Hackathon Inova AI
+## Equipe  
+- João Victor Pereira Bicalho
+- Pedro Huck Henrique
+- Tulio Gonçalves Vieira  
 
 **Detecção de redes de fraude no Pix com Graph Neural Networks.**
 
