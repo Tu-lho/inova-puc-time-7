@@ -1,0 +1,21 @@
+# Artefatos gerados
+data/*.png
+data/*.html
+data/*.csv
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.ipynb_checkpoints/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Artefato do pyvis (gerado junto ao HTML)
+lib/
