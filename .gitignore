@@ -1,6 +1,10 @@
 # Artefatos gerados
 data/*.csv
 
+# Datasets reais (Kaggle) e checkpoints da GNN — não versionar
+data/raw/
+data/checkpoints/
+
 # Python
 __pycache__/
 *.py[cod]

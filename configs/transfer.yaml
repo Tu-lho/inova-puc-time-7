@@ -1,0 +1,104 @@
+# =============================================================================
+# GraphGuard — configuração de treino da GNN por transfer learning
+# =============================================================================
+# Estratégia (segunda etapa): pré-treinar o backbone GraphSAGE no Elliptic
+# (maior, rótulos confiáveis) -> fine-tuning no IBM AML HI-Small (estrutura
+# bancária, padrões de lavagem explícitos) -> validar no LI-Small (proporção
+# realista de fraude ~0,05%).
+#
+# Decisões de arquitetura (ver docs/SEGUNDA-ETAPA.md):
+#   - Nó = CONTA (alinhado ao produto: "essa conta faz parte de uma rede
+#     suspeita?"). O Elliptic é transação-como-nó e entra como pré-treino do
+#     backbone — a ressalva de semântica está documentada.
+#   - Features heterogêneas entre datasets são resolvidas com um ENCODER por
+#     dataset (Linear -> dimensão comum) + um BACKBONE de message-passing
+#     COMPARTILHADO. O encoder é reinicializado por dataset; o backbone e a
+#     cabeça de classificação são transferidos entre os estágios.
+# =============================================================================
+
+seed: 42
+device: cuda            # cuda | cpu  (você indicou 1 GPU)
+
+paths:
+  data_root: data/raw            # onde os CSVs do Kaggle são extraídos
+  checkpoints: data/checkpoints  # onde os pesos do backbone são salvos
+
+# -----------------------------------------------------------------------------
+# Datasets — cada um vira um grafo com o contrato comum (x, edge_index, y, masks)
+# -----------------------------------------------------------------------------
+datasets:
+
+  elliptic:
+    kind: elliptic               # loader: src/datasets/elliptic.py
+    root: data/raw/elliptic
+    features_file: elliptic_txs_features.csv
+    classes_file: elliptic_txs_classes.csv
+    edgelist_file: elliptic_txs_edgelist.csv
+    # split temporal clássico (Weber et al., 2019)
+    train_time_steps: [1, 34]
+    test_time_steps: [35, 49]
+    drop_unknown: true           # nós "unknown" ficam fora da loss (só mensagem)
+
+  ibm_aml_hi_small:
+    kind: ibm_aml                # loader: src/datasets/ibm_aml.py
+    root: data/raw/ibm-aml
+    trans_file: HI-Small_Trans.csv
+    val_fraction: 0.15           # split interno p/ early-stopping no fine-tune
+    compute_betweenness: false   # caro em grafos grandes; ver docs
+
+  ibm_aml_li_small:
+    kind: ibm_aml
+    root: data/raw/ibm-aml
+    trans_file: LI-Small_Trans.csv   # proporção realista (~0,05%) — validação
+    val_fraction: 1.0            # tudo é avaliação neste estágio
+    compute_betweenness: false
+
+# -----------------------------------------------------------------------------
+# Modelo — backbone compartilhado entre os estágios
+# -----------------------------------------------------------------------------
+model:
+  arch: graphsage     # graphsage (escolhido). gat / evolvegcn ficam para depois
+  hidden_dim: 64
+  num_layers: 2
+  dropout: 0.3
+
+# -----------------------------------------------------------------------------
+# Treino — comum a todos os estágios (cada estágio sobrescreve epochs/lr se quiser)
+# -----------------------------------------------------------------------------
+train:
+  optimizer:
+    lr: 0.005
+    weight_decay: 5.0e-4
+  class_weight: balanced        # fraude é minoria — pesa a classe positiva
+  # Mini-batch por amostragem de vizinhança (você tem GPU). Em CPU, ponha
+  # enabled: false para treino full-batch (o Elliptic cabe em memória).
+  neighbor_sampling:
+    enabled: true
+    num_neighbors: [25, 10]     # 1 entrada por camada do backbone
+    batch_size: 2048
+  eval:
+    max_fpr: 0.05               # métrica-chave: recall com <5% de falsos positivos
+    threshold: 0.5
+
+# -----------------------------------------------------------------------------
+# Pipeline de transfer learning — executado na ordem
+# -----------------------------------------------------------------------------
+pipeline:
+  - name: pretrain_elliptic
+    dataset: elliptic
+    epochs: 100
+    load_backbone: null                       # treina do zero
+    save_backbone: elliptic_backbone.pt
+
+  - name: finetune_ibm_hi_small
+    dataset: ibm_aml_hi_small
+    epochs: 50
+    lr: 0.001                                  # lr menor no fine-tune
+    load_backbone: elliptic_backbone.pt
+    save_backbone: ibm_finetuned_backbone.pt
+
+  - name: validate_ibm_li_small
+    dataset: ibm_aml_li_small
+    epochs: 0                                  # só avaliação
+    load_backbone: ibm_finetuned_backbone.pt
+    save_backbone: null
